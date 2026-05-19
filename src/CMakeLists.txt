@@ -1,0 +1,3 @@
+add_library(my_library STATIC my_library.cpp)
+target_include_directories(my_library PUBLIC include)
+target_compile_features(my_library PUBLIC cxx_std_20)

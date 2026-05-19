@@ -1,0 +1,33 @@
+# CMake generated files
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+
+# Vcpkg folders (prevent uploading heavy installed binaries)
+vcpkg_installed/
+vcpkg/
+
+# Build Directories
+build/
+Build/
+build-*/
+
+# Executables
+*.out
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
