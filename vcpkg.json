@@ -2,8 +2,9 @@
   "name": "kestral",
   "version": "0.1.0",
   "dependencies": [
-    "fmt",
+    "catch2" ,
+    "rocksdb",
     "spdlog",
-    "catch2" 
+    "benchmark"
   ]
 }
