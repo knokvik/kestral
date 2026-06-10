@@ -7,6 +7,11 @@ set(CMAKE_TOOLCHAIN_FILE
 
 project(kestral LANGUAGES CXX)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # 2. Apple Silicon OpenMP Overrides
 if(APPLE)
     set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
@@ -21,13 +26,13 @@ find_package(RocksDB CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
-# 4. Process the src subdirectory (this builds my_library and benchmark_exe)
+# 4. Process the src subdirectory (this builds the core library and benchmarks)
 add_subdirectory(src)
 
 # 5. Build core executable (placed in root context since it references ./src/main.cpp)
 add_executable(kestral_run ./src/main.cpp)
 target_link_libraries(kestral_run PRIVATE 
-    my_library 
+    kestral 
     OpenMP::OpenMP_CXX 
     RocksDB::rocksdb
     spdlog::spdlog
@@ -36,5 +41,5 @@ target_link_libraries(kestral_run PRIVATE
 # 6. Testing Setup
 enable_testing()
 add_executable(test_main tests/test_main.cpp)
-target_link_libraries(test_main PRIVATE my_library Catch2::Catch2WithMain)
+target_link_libraries(test_main PRIVATE kestral Catch2::Catch2WithMain)
 add_test(NAME test_main COMMAND test_main)

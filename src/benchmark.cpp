@@ -1,30 +1,107 @@
+#include "kestral/ingest/ingestion_pipeline.hpp"
+#include "kestral/ingest/synthetic_corpus.hpp"
+#include "kestral/search/lexical_index.hpp"
+#include "kestral/storage/document_store.hpp"
+
 #include <benchmark/benchmark.h>
-#include <iostream>
-#include "my_library.hpp"
-// Benchmark document generation
-static void BM_GenerateDocuments(benchmark::State& state) {
-    DocumentStore store;
-    SyntheticDataGenerator generator;
-    for (auto _ : state) {
-        generator.generate(store, 1000);  // Generate 1000 documents per iteration
-    }
-}
-BENCHMARK(BM_GenerateDocuments);
 
-// Benchmark RocksDB writes
-static void BM_RocksDBWrites(benchmark::State& state) {
-    DocumentDB db("./benchmark_db");
-    DocumentStore store;
-    SyntheticDataGenerator generator;
-    generator.generate(store, 1000);  // Pre-generate 1000 documents
+#include <filesystem>
+#include <string>
+#include <vector>
 
-    for (auto _ : state) {
-        for (size_t i = 0; i < store.ids.size(); ++i) {
-            std::string doc_data = std::to_string(store.timestamps[i]) + "|" + store.titles[i] + "|" + store.contents[i];
-            db.write_document(store.ids[i], doc_data);
-        }
-    }
+namespace {
+
+std::filesystem::path make_benchmark_path(int batch_size) {
+  return std::filesystem::temp_directory_path() /
+         ("kestral-bench-" + std::to_string(batch_size));
 }
-BENCHMARK(BM_RocksDBWrites);
+
+void BM_BatchedIngestion(benchmark::State &state) {
+  const std::size_t batch_size = static_cast<std::size_t>(state.range(0));
+  constexpr std::size_t kDocumentCount = 100000;
+  const auto db_path = make_benchmark_path(static_cast<int>(batch_size));
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    std::filesystem::remove_all(db_path);
+    state.ResumeTiming();
+
+    kestral::IngestionMetrics metrics;
+    {
+      kestral::SyntheticCorpusGenerator generator;
+      kestral::DocumentStore store({
+          .db_path = db_path.string(),
+          .write_buffer_size_mb = 128,
+      });
+      kestral::IngestionPipeline pipeline(
+          generator,
+          store,
+          {
+              .total_documents = kDocumentCount,
+              .batch_size = batch_size,
+          });
+
+      metrics = pipeline.run();
+    }
+
+    auto docs_per_second = metrics.documents_per_second;
+    benchmark::DoNotOptimize(docs_per_second);
+    state.counters["docs_per_sec"] = metrics.documents_per_second;
+    state.counters["avg_batch_ms"] = metrics.average_batch_latency_ms;
+    state.counters["p95_batch_ms"] = metrics.p95_batch_latency_ms;
+
+    state.PauseTiming();
+    std::filesystem::remove_all(db_path);
+    state.ResumeTiming();
+  }
+}
+
+void BM_LexicalSearch(benchmark::State &state) {
+  const std::size_t document_count = static_cast<std::size_t>(state.range(0));
+  constexpr std::size_t kBatchSize = 4096;
+
+  kestral::SyntheticCorpusGenerator generator;
+  kestral::DocumentBatch batch(kBatchSize);
+  kestral::LexicalSegmentBuilder builder;
+
+  std::size_t remaining_documents = document_count;
+  while (remaining_documents > 0) {
+    const auto documents_this_batch = std::min(kBatchSize, remaining_documents);
+    generator.generate_next_batch(batch, documents_this_batch);
+    builder.consume(batch.documents());
+    remaining_documents -= documents_this_batch;
+  }
+
+  kestral::PublishedLexicalIndex lexical_index;
+  lexical_index.publish_segment(std::move(builder).build());
+
+  const std::vector<std::string> queries = {
+      "vector search",
+      "segment latency",
+      "allocator throughput query",
+      "freshness ranking storage",
+  };
+  std::size_t query_index = 0;
+  std::uint64_t checksum = 0;
+
+  for (auto _ : state) {
+    const auto &query = queries[query_index % queries.size()];
+    const auto results = lexical_index.search(query, {.top_k = 10});
+    if (!results.empty()) {
+      checksum ^= results.front().document_id;
+    }
+    query_index += 1;
+  }
+
+  state.counters["docs"] = static_cast<double>(document_count);
+  state.counters["segments"] =
+      static_cast<double>(lexical_index.segment_count());
+  state.counters["checksum"] = static_cast<double>(checksum);
+}
+
+} // namespace
+
+BENCHMARK(BM_BatchedIngestion)->Arg(512)->Arg(2048)->Arg(8192);
+BENCHMARK(BM_LexicalSearch)->Arg(10000)->Arg(50000)->Arg(100000);
 
 BENCHMARK_MAIN();

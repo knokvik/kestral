@@ -31,3 +31,7 @@ build-*/
 *.user
 *.userosscache
 *.sln.docstates
+
+# macOS and local cache noise
+.DS_Store
+.cache/
