@@ -1,8 +1,10 @@
 #include "kestral/ingest/ingestion_pipeline.hpp"
 #include "kestral/ingest/synthetic_corpus.hpp"
 #include "kestral/search/lexical_index.hpp"
+#include "kestral/search/vector_index.hpp"
 #include "kestral/storage/document_store.hpp"
 #include <filesystem>
+#include <iostream>
 #include <spdlog/spdlog.h>
 #include <cstdint>
 #include <stdexcept>
@@ -97,6 +99,8 @@ int main(int argc, char **argv) {
 
     kestral::SyntheticCorpusGenerator generator;
     kestral::LexicalSegmentBuilder lexical_segment_builder;
+    kestral::VectorIndex vector_index(128); // Add 128-d VectorIndex
+
     kestral::IngestionPipeline pipeline(
         generator,
         store,
@@ -104,7 +108,7 @@ int main(int argc, char **argv) {
             .total_documents = options.document_count,
             .batch_size = options.batch_size,
             .num_threads = options.num_threads,
-            .consumers = {&lexical_segment_builder},
+            .consumers = {&lexical_segment_builder, &vector_index},
         });
 
     const auto metrics = pipeline.run();
@@ -123,6 +127,7 @@ int main(int argc, char **argv) {
                  lexical_index.segment_count(),
                  lexical_index.total_document_count(),
                  lexical_index.total_unique_term_count());
+    spdlog::info("Built VectorIndex covering {} documents", vector_index.size());
 
     if (const auto first_document = store.read_document(1)) {
       spdlog::info("Document 1 title: {}", first_document->title);
@@ -143,9 +148,11 @@ int main(int argc, char **argv) {
       }
     }
   } catch (const std::exception &error) {
+    std::cerr << "kestral_run failed: " << error.what() << "\n";
     spdlog::error("kestral_run failed: {}", error.what());
     return 1;
   }
 
+  std::cout << "kestral_run finished successfully.\n";
   return 0;
 }

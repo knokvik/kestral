@@ -15,8 +15,12 @@ VectorIndex::VectorIndex(std::size_t dimensions)
 }
 
 void VectorIndex::consume(std::span<const Document> documents) {
-  if (index_.size() + documents.size() > index_.capacity()) {
-    index_.reserve(index_.capacity() + documents.size() + 10000);
+  {
+    static std::mutex reserve_mutex;
+    std::lock_guard<std::mutex> lock(reserve_mutex);
+    if (index_.size() + documents.size() > index_.capacity()) {
+      index_.reserve(index_.capacity() + documents.size() + 100000);
+    }
   }
   for (const auto &document : documents) {
     if (document.embedding.size() != dimensions_) {
