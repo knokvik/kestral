@@ -2,6 +2,7 @@
 #include "kestral/ingest/synthetic_corpus.hpp"
 #include "kestral/search/segment_manager.hpp"
 #include "kestral/search/vector_index.hpp"
+#include "kestral/search/http_server.hpp"
 #include "kestral/storage/document_store.hpp"
 #include <filesystem>
 #include <iostream>
@@ -20,6 +21,7 @@ struct CommandLineOptions {
   std::size_t write_buffer_size_mb = 128;
   std::size_t top_k = 5;
   std::size_t num_threads = 0;
+  bool run_server = false;
   std::string query;
 };
 
@@ -63,6 +65,11 @@ CommandLineOptions parse_command_line(int argc, char **argv) {
 
     if (argument == "--top-k" && index + 1 < argc) {
       options.top_k = parse_unsigned(argv[++index], "--top-k");
+      continue;
+    }
+
+    if (argument == "--server") {
+      options.run_server = true;
       continue;
     }
 
@@ -148,12 +155,21 @@ int main(int argc, char **argv) {
                      result.matched_terms);
       }
     }
-  } catch (const std::exception &error) {
-    std::cerr << "kestral_run failed: " << error.what() << "\n";
-    spdlog::error("kestral_run failed: {}", error.what());
+
+    kestral::HybridSearchEngine search_engine(lexical_index, vector_index);
+
+    if (options.run_server) {
+      kestral::HttpServer server(search_engine);
+      server.start();
+      spdlog::info("Press Enter to stop the server...");
+      std::cin.get();
+      server.stop();
+    }
+
+  } catch (const std::exception &e) {
+    spdlog::error("Fatal error: {}", e.what());
     return 1;
   }
 
-  std::cout << "kestral_run finished successfully.\n";
   return 0;
 }

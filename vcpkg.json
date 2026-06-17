@@ -6,6 +6,8 @@
     "rocksdb",
     "spdlog",
     "benchmark",
-    "usearch"
+    "usearch",
+    "cpp-httplib",
+    "nlohmann-json"
   ]
 }

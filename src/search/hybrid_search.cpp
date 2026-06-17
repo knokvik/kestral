@@ -33,14 +33,16 @@ HybridSearchEngine::search(std::string_view text_query,
 
   // Vector index might not support deleted_docs directly in its search API yet,
   // so we fetch more (e.g. top_k * 3) and filter them manually.
-  auto raw_vector_results = vector_index_.search(vector_query, top_k * 3);
   std::vector<VectorSearchResult> vector_results;
-  vector_results.reserve(raw_vector_results.size());
-  for (const auto &res : raw_vector_results) {
-    if (!deleted_docs_ || !deleted_docs_->is_deleted(res.document_id)) {
-      vector_results.push_back(res);
-      if (vector_results.size() >= top_k * 2) {
-        break;
+  if (!vector_query.empty()) {
+    auto raw_vector_results = vector_index_.search(vector_query, top_k * 3);
+    vector_results.reserve(raw_vector_results.size());
+    for (const auto &res : raw_vector_results) {
+      if (!deleted_docs_ || !deleted_docs_->is_deleted(res.document_id)) {
+        vector_results.push_back(res);
+        if (vector_results.size() >= top_k * 2) {
+          break;
+        }
       }
     }
   }

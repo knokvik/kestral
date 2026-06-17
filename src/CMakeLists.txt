@@ -2,6 +2,7 @@ set(KESTRAL_LIBRARY_SOURCES
     ingest/ingestion_pipeline.cpp
     ingest/synthetic_corpus.cpp
     search/hybrid_search.cpp
+    search/http_server.cpp
     search/lexical_index.cpp
     search/query_cache.cpp
     search/segment_manager.cpp
@@ -14,7 +15,7 @@ set(KESTRAL_LIBRARY_SOURCES
 add_library(kestral STATIC ${KESTRAL_LIBRARY_SOURCES})
 target_include_directories(kestral PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_compile_features(kestral PUBLIC cxx_std_20)
-target_link_libraries(kestral PUBLIC RocksDB::rocksdb spdlog::spdlog usearch::usearch)
+target_link_libraries(kestral PUBLIC RocksDB::rocksdb spdlog::spdlog usearch::usearch httplib::httplib nlohmann_json::nlohmann_json)
 
 add_executable(benchmark_exe benchmark.cpp)
 target_link_libraries(benchmark_exe PRIVATE kestral benchmark::benchmark_main)

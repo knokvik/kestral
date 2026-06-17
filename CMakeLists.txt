@@ -26,6 +26,8 @@ find_package(RocksDB CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(usearch CONFIG REQUIRED)
+find_package(httplib CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # 4. Process the src subdirectory (this builds the core library and benchmarks)
 add_subdirectory(src)
@@ -37,6 +39,8 @@ target_link_libraries(kestral_run PRIVATE
     OpenMP::OpenMP_CXX 
     RocksDB::rocksdb
     spdlog::spdlog
+    httplib::httplib
+    nlohmann_json::nlohmann_json
 )
 
 # 6. Testing Setup
