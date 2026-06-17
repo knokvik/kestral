@@ -1,7 +1,13 @@
-# Kestral Engine
+## Low Latency Engine
 
-Kestral Engine is a state-of-the-art, high-throughput C++ document processing engine engineered for microsecond latencies and massive scalability. It leverages bare-metal hardware acceleration to parse, tokenize, and ingest multi-gigabyte corpora directly into queryable in-memory structures. By completely avoiding dynamic memory allocations in the hot path, Kestral routinely saturates modern NVMe storage and multi-core architectures to achieve over 150,000 documents per second per node.
+It is a high throughput, state of the art C++ document processing engine designed to be microsecond latency and enormously scalable. It utilizes hardware acceleration of bare-metal hardware to parse, tokenize and ingest multi-gigabyte corpora directly to in-memory queryable structures. Kestral's programming style avoids all dynamic memory allocations in the "hot path", so that it can routinely reach more than 150,000 documents per second per node on modern NVMe storage and multi-core architectures.
 
+![RocksDB](https://img.shields.io/badge/RocksDB-Database-blue)
+![AVX-512](https://img.shields.io/badge/AVX--512-SIMD-green)
+![ARM Neon](https://img.shields.io/badge/ARM-Neon-orange)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)
+![Pybind11](https://img.shields.io/badge/Pybind11-Bindings-yellow)
+![Google Benchmark](https://img.shields.io/badge/Google-Benchmark-red)
 
 ### Architecture Pipeline
 
@@ -23,9 +29,9 @@ flowchart LR
 
 ## Performance Benchmarks
 
-Performance validation is integrated continuously using Google Benchmark to guarantee regression-free latency profiles. We compile the engine using highly optimized compilation targets (`-O3 -march=native -flto`) to extract maximum silicon utilization.
+Google Benchmark is used in performance validation throughout, to provide regression-free latency profiles. We optimize the engine as much as possible (without compromising on code quality) using compilation targets, such as `-O3 -march=native -flto`, to get the best silicon usage.
 
-### Throughput Comparison (Documents / Sec)
+Throughput Comparison (Documents / Sec): This is the number of documents that can be processed in one second.
 
 ```text
 Kestral Engine         | ████████████████████████████████████████ 152,431 docs/s
@@ -33,9 +39,9 @@ Industry Competitor A  | ██████████████████�
 Industry Competitor B  | ███████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  21,440 docs/s
 ```
 
-### Search Latency & Throughput Scaling
+The scaling of search latency and throughput.Scaling of search latency and throughput.
 
-Our engine's performance scales linearly with batch sizes and maintains sub-millisecond latencies even across dense hybrid vector (HNSW) search intersections.
+We've seen linear performance growth with batch sizes and sub-milisecond latencies even in dense hybrid vector (HNSW) search intersections.
 
 ![Search Latency](benchmark_assets/search_latency.png)
 
@@ -44,7 +50,7 @@ Our engine's performance scales linearly with batch sizes and maintains sub-mill
 ![Ingestion Throughput](benchmark_assets/ingestion_throughput.png)
 
 ### Reproducing the Benchmarks
-To rigorously reproduce the exact performance characteristics reported above, you must execute the suite using the Google Benchmark JSON reporter and run our Python Matplotlib ingestion script.
+The suite should be run on Google Benchmark JSON reporter to precisely replicate the performance numbers reported above, and should also be run with our Python Matplotlib ingestion script.
 
 ```bash
 # 1. Compile with extreme optimizations
@@ -62,7 +68,7 @@ python3 benchmark_assets/plot_benchmarks.py benchmark_assets/results.json
 
 ## Live CLI Interface
 
-To monitor massive data ingestion without degrading the core engine's performance, Kestral features a fully decoupled, zero-overhead Terminal User Interface (TUI). 
+All the Terminal User Interface (TUI) is completely separated from the core engine and has zero overhead, this allows Kestral to monitor large amounts of data with the core engine performance not impacted. 
 
 ```text
 ┌────────────────────────────────────────────────────────────┐
@@ -79,7 +85,7 @@ To monitor massive data ingestion without degrading the core engine's performanc
 └────────────────────────────────────────────────────────────┘
 ```
 
-**Technical Implementation:** This classic TUI dialog is rendered on a dedicated background thread. It operates completely out-of-band by reading lock-free `std::atomic<size_t>` progress counters updated by the core engine. The UI thread wakes up via `std::this_thread::sleep_for` at exactly 30 FPS, ensuring that screen rendering I/O never preempts or bottlenecks the microsecond-level document processing hot paths.
+Technical Implementation: It is a classic TUI dialog that is displayed on a dedicated BackgroundThread. It runs totally out-of-band, reading the so-called lock-free progress counters maintained by the core engine, which are of type std::atomic<size_t> objects. The UI thread is awoken at exactly 30 FPS by using `std::this_thread::sleep_for`, so that the microsecond-level processing of documents does not preempt or bottleneck the I/O to the screen.
 
 ---
 
@@ -87,7 +93,7 @@ To monitor massive data ingestion without degrading the core engine's performanc
 
 ### Zero-Copy API Example
 
-The following C++ example demonstrates utilizing Kestral's zero-copy tokenization interface:
+The following example in C++ shows how to use Kestral zero-copy tokenization interface:
 
 ```cpp
 #include <kestral/search/tokenizer.hpp>
