@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -159,6 +160,7 @@ public:
 
 private:
   Tokenizer tokenizer_;
+  mutable std::shared_mutex mutex_;
   std::vector<std::shared_ptr<const InvertedIndexSegment>> segments_;
 };
 

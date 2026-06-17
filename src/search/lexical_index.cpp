@@ -429,26 +429,28 @@ std::vector<SearchResult> InvertedIndexSegment::search(
 // ---------------------------------------------------------------------------
 
 void PublishedLexicalIndex::publish_segment(InvertedIndexSegment segment) {
-  segments_.push_back(
-      std::make_shared<const InvertedIndexSegment>(std::move(segment)));
+  auto ptr = std::make_shared<const InvertedIndexSegment>(std::move(segment));
+  std::unique_lock lock(mutex_);
+  segments_.push_back(std::move(ptr));
 }
 
-std::vector<SearchResult> PublishedLexicalIndex::search(
-    std::string_view query, SearchOptions options) const {
-  if (options.top_k == 0) {
-    return {};
-  }
-
-  // Zero-copy tokenization for the query path too.
-  std::string scratch;
+std::vector<SearchResult>
+PublishedLexicalIndex::search(std::string_view query,
+                              SearchOptions options) const {
   std::vector<std::string_view> query_terms;
-  tokenizer_.tokenize_views(query, scratch, query_terms);
-  if (query_terms.empty()) {
-    return {};
+  // Let's create a local Tokenizer for thread-safety during search
+  Tokenizer local_tokenizer;
+  std::string scratch;
+  local_tokenizer.tokenize_views(query, scratch, query_terms);
+
+  std::vector<std::shared_ptr<const InvertedIndexSegment>> local_segments;
+  {
+    std::shared_lock lock(mutex_);
+    local_segments = segments_; // Fast atomic copy of shared_ptrs
   }
 
   std::vector<SearchResult> merged_results;
-  for (const auto &segment : segments_) {
+  for (const auto &segment : local_segments) {
     auto segment_results = segment->search(query_terms, options);
     merged_results.insert(merged_results.end(),
                           std::make_move_iterator(segment_results.begin()),
@@ -465,10 +467,8 @@ std::vector<SearchResult> PublishedLexicalIndex::search(
       if (left.matched_terms == right.matched_terms) {
         return left.document_id < right.document_id;
       }
-
       return left.matched_terms > right.matched_terms;
     }
-
     return left.score > right.score;
   };
 
@@ -483,24 +483,33 @@ std::vector<SearchResult> PublishedLexicalIndex::search(
 }
 
 std::size_t PublishedLexicalIndex::segment_count() const {
+  std::shared_lock lock(mutex_);
   return segments_.size();
 }
 
 std::size_t PublishedLexicalIndex::total_document_count() const {
+  std::vector<std::shared_ptr<const InvertedIndexSegment>> local_segments;
+  {
+    std::shared_lock lock(mutex_);
+    local_segments = segments_;
+  }
   std::size_t total_documents = 0;
-  for (const auto &segment : segments_) {
+  for (const auto &segment : local_segments) {
     total_documents += segment->document_count();
   }
-
   return total_documents;
 }
 
 std::size_t PublishedLexicalIndex::total_unique_term_count() const {
+  std::vector<std::shared_ptr<const InvertedIndexSegment>> local_segments;
+  {
+    std::shared_lock lock(mutex_);
+    local_segments = segments_;
+  }
   std::size_t total_terms = 0;
-  for (const auto &segment : segments_) {
+  for (const auto &segment : local_segments) {
     total_terms += segment->unique_term_count();
   }
-
   return total_terms;
 }
 

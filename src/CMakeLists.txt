@@ -4,6 +4,7 @@ set(KESTRAL_LIBRARY_SOURCES
     search/hybrid_search.cpp
     search/lexical_index.cpp
     search/query_cache.cpp
+    search/segment_manager.cpp
     search/tokenizer.cpp
     search/vbyte.cpp
     search/vector_index.cpp

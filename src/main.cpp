@@ -1,6 +1,6 @@
 #include "kestral/ingest/ingestion_pipeline.hpp"
 #include "kestral/ingest/synthetic_corpus.hpp"
-#include "kestral/search/lexical_index.hpp"
+#include "kestral/search/segment_manager.hpp"
 #include "kestral/search/vector_index.hpp"
 #include "kestral/storage/document_store.hpp"
 #include <filesystem>
@@ -98,8 +98,10 @@ int main(int argc, char **argv) {
     });
 
     kestral::SyntheticCorpusGenerator generator;
-    kestral::LexicalSegmentBuilder lexical_segment_builder;
     kestral::VectorIndex vector_index(128); // Add 128-d VectorIndex
+
+    kestral::PublishedLexicalIndex lexical_index;
+    kestral::SegmentManager segment_manager(lexical_index, 10000, std::chrono::seconds(5));
 
     kestral::IngestionPipeline pipeline(
         generator,
@@ -108,12 +110,11 @@ int main(int argc, char **argv) {
             .total_documents = options.document_count,
             .batch_size = options.batch_size,
             .num_threads = options.num_threads,
-            .consumers = {&lexical_segment_builder, &vector_index},
+            .consumers = {&segment_manager, &vector_index},
         });
 
     const auto metrics = pipeline.run();
-    kestral::PublishedLexicalIndex lexical_index;
-    lexical_index.publish_segment(std::move(lexical_segment_builder).build());
+    segment_manager.force_publish();
 
     spdlog::info("Ingested {} documents in {:.3f}s ({:.0f} docs/sec)",
                  metrics.documents_written,
