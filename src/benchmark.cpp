@@ -236,6 +236,20 @@ static void BM_HybridSearch(benchmark::State &state) {
 }
 BENCHMARK(BM_HybridSearch)->Arg(10000)->Arg(50000)->Arg(100000)->Iterations(1);
 
+static void BM_QueryCacheHit(benchmark::State &state) {
+  kestral::QueryCache cache(1000, std::chrono::minutes(5));
+  kestral::CacheKey key{"test_query", 10, false};
+  
+  std::vector<kestral::SearchResult> mock_results(10);
+  cache.put(key, mock_results);
+
+  for (auto _ : state) {
+    auto results = cache.get(key);
+    benchmark::DoNotOptimize(results);
+  }
+}
+BENCHMARK(BM_QueryCacheHit);
+
 // ---------------------------------------------------------------------------
 // Tokenizer micro-benchmark: allocating vs zero-copy
 // ---------------------------------------------------------------------------

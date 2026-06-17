@@ -7,6 +7,8 @@
 #include <vector>
 #include <cstdint>
 
+#include "kestral/search/query_cache.hpp"
+
 namespace kestral {
 
 struct HybridSearchResult {
@@ -17,7 +19,8 @@ struct HybridSearchResult {
 class HybridSearchEngine {
 public:
   HybridSearchEngine(const PublishedLexicalIndex &lexical_index,
-                     const VectorIndex &vector_index);
+                     const VectorIndex &vector_index,
+                     std::shared_ptr<QueryCache> cache = nullptr);
 
   std::vector<HybridSearchResult> search(std::string_view text_query,
                                          std::span<const float> vector_query,
@@ -27,6 +30,7 @@ public:
 private:
   const PublishedLexicalIndex &lexical_index_;
   const VectorIndex &vector_index_;
+  std::shared_ptr<QueryCache> cache_;
 };
 
 } // namespace kestral

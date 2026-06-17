@@ -375,3 +375,36 @@ TEST_CASE("Skip Pointers and DAAT intersection", "[search]") {
   REQUIRE(results_and.size() == 1); // Only doc 250 has both
   REQUIRE(results_and[0].document_id == 250);
 }
+
+#include "kestral/search/query_cache.hpp"
+#include <thread>
+
+TEST_CASE("QueryCache LRU and TTL", "[cache]") {
+  kestral::QueryCache cache(2, std::chrono::milliseconds(50));
+
+  kestral::CacheKey key1{"query1", 10, false};
+  kestral::CacheKey key2{"query2", 10, false};
+  kestral::CacheKey key3{"query3", 10, false};
+
+  std::vector<kestral::SearchResult> res1{{1, 1.0, 1}};
+  std::vector<kestral::SearchResult> res2{{2, 1.0, 1}};
+  std::vector<kestral::SearchResult> res3{{3, 1.0, 1}};
+
+  cache.put(key1, res1);
+  cache.put(key2, res2);
+
+  REQUIRE(cache.size() == 2);
+  REQUIRE(cache.get(key1).has_value());
+  REQUIRE(cache.get(key2).has_value());
+
+  // Insert 3rd, should evict key1 (since we didn't update LRU on read)
+  cache.put(key3, res3);
+  REQUIRE(cache.size() == 2);
+  REQUIRE(!cache.get(key1).has_value()); // Evicted
+  REQUIRE(cache.get(key2).has_value());
+  REQUIRE(cache.get(key3).has_value());
+
+  // Test TTL
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  REQUIRE(!cache.get(key2).has_value()); // Expired
+}

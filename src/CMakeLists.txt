@@ -3,6 +3,7 @@ set(KESTRAL_LIBRARY_SOURCES
     ingest/synthetic_corpus.cpp
     search/hybrid_search.cpp
     search/lexical_index.cpp
+    search/query_cache.cpp
     search/tokenizer.cpp
     search/vbyte.cpp
     search/vector_index.cpp

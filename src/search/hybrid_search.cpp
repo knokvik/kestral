@@ -6,15 +6,30 @@
 namespace kestral {
 
 HybridSearchEngine::HybridSearchEngine(const PublishedLexicalIndex &lexical_index,
-                                       const VectorIndex &vector_index)
-    : lexical_index_(lexical_index), vector_index_(vector_index) {}
+                                       const VectorIndex &vector_index,
+                                       std::shared_ptr<QueryCache> cache)
+    : lexical_index_(lexical_index), vector_index_(vector_index), cache_(std::move(cache)) {}
 
 std::vector<HybridSearchResult>
 HybridSearchEngine::search(std::string_view text_query,
                            std::span<const float> vector_query,
                            std::size_t top_k, float rrf_k) const {
   // 1. Perform individual searches (we fetch top_k * 2 from each to ensure overlap if possible)
-  auto lexical_results = lexical_index_.search(text_query, {.top_k = top_k * 2});
+  std::vector<SearchResult> lexical_results;
+  
+  if (cache_) {
+    CacheKey key{std::string(text_query), top_k * 2, false};
+    auto cached = cache_->get(key);
+    if (cached) {
+      lexical_results = *std::move(cached);
+    } else {
+      lexical_results = lexical_index_.search(text_query, {.top_k = top_k * 2, .require_all_terms = false});
+      cache_->put(key, lexical_results);
+    }
+  } else {
+    lexical_results = lexical_index_.search(text_query, {.top_k = top_k * 2, .require_all_terms = false});
+  }
+
   auto vector_results = vector_index_.search(vector_query, top_k * 2);
 
   // 2. Accumulate RRF scores
