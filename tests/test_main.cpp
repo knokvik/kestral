@@ -408,3 +408,41 @@ TEST_CASE("QueryCache LRU and TTL", "[cache]") {
   std::this_thread::sleep_for(std::chrono::milliseconds(60));
   REQUIRE(!cache.get(key2).has_value()); // Expired
 }
+
+#include "kestral/search/deleted_docs.hpp"
+#include "kestral/search/hybrid_search.hpp"
+
+TEST_CASE("Soft Deletes", "[search]") {
+  kestral::LexicalSegmentBuilder builder;
+  kestral::DocumentBatch batch;
+  kestral::VectorIndex vector_index(128);
+
+  for (std::uint32_t i = 1; i <= 5; ++i) {
+    batch.add({.id = i, .title = "Doc", .body = "hello world", .embedding = std::vector<float>(128, 0.1f)});
+  }
+
+  builder.consume(batch.documents());
+  vector_index.consume(batch.documents());
+  kestral::PublishedLexicalIndex lexical_index;
+  lexical_index.publish_segment(std::move(builder).build());
+
+  auto deleted_docs = std::make_shared<kestral::DeletedDocs>();
+  kestral::HybridSearchEngine engine(lexical_index, vector_index, nullptr, deleted_docs);
+
+  std::vector<float> query_vec(128, 0.1f);
+
+  auto results_before = engine.search("hello", query_vec, 10);
+  REQUIRE(results_before.size() == 5);
+
+  deleted_docs->mark_deleted(2);
+  deleted_docs->mark_deleted(4);
+
+  auto results_after = engine.search("hello", query_vec, 10);
+  REQUIRE(results_after.size() == 3);
+
+  // Check that IDs 2 and 4 are not in the results
+  for (const auto& res : results_after) {
+    REQUIRE(res.document_id != 2);
+    REQUIRE(res.document_id != 4);
+  }
+}

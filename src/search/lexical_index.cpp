@@ -342,21 +342,30 @@ std::vector<SearchResult> InvertedIndexSegment::search(
       }
 
       if (match) {
-        auto &accumulated_score = accumulators[candidate_doc];
         const auto &document = documents_[candidate_doc];
         
-        for (std::size_t i = 0; i < iterators.size(); ++i) {
-          const std::size_t orig_idx = iterator_order[i];
-          accumulated_score.score +=
-              static_cast<double>(query_weights[orig_idx]) *
-              bm25_term_score(static_cast<std::uint16_t>(iterators[orig_idx].term_frequency()),
-                              document.weighted_length,
-                              average_document_length_,
-                              documents_.size(),
-                              document_frequencies[orig_idx],
-                              options);
-          accumulated_score.matched_terms += 1;
-          iterators[orig_idx].next();
+        // Soft delete check
+        if (!options.deleted_docs || !options.deleted_docs->is_deleted(document.id)) {
+          auto &accumulated_score = accumulators[candidate_doc];
+          
+          for (std::size_t i = 0; i < iterators.size(); ++i) {
+            const std::size_t orig_idx = iterator_order[i];
+            accumulated_score.score +=
+                static_cast<double>(query_weights[orig_idx]) *
+                bm25_term_score(static_cast<std::uint16_t>(iterators[orig_idx].term_frequency()),
+                                document.weighted_length,
+                                average_document_length_,
+                                documents_.size(),
+                                document_frequencies[orig_idx],
+                                options);
+            accumulated_score.matched_terms += 1;
+            iterators[orig_idx].next();
+          }
+        } else {
+          // It's deleted, but we still need to advance the iterators
+          for (std::size_t i = 0; i < iterators.size(); ++i) {
+            iterators[i].next();
+          }
         }
       }
     }
@@ -372,16 +381,19 @@ std::vector<SearchResult> InvertedIndexSegment::search(
         const std::uint32_t term_frequency = it.term_frequency();
         const auto &document = documents_[doc_index];
 
-        auto &accumulated_score = accumulators[doc_index];
-        accumulated_score.score +=
-            static_cast<double>(query_weight) *
-            bm25_term_score(static_cast<std::uint16_t>(term_frequency),
-                            document.weighted_length,
-                            average_document_length_,
-                            documents_.size(),
-                            df,
-                            options);
-        accumulated_score.matched_terms += 1;
+        // Soft delete check
+        if (!options.deleted_docs || !options.deleted_docs->is_deleted(document.id)) {
+          auto &accumulated_score = accumulators[doc_index];
+          accumulated_score.score +=
+              static_cast<double>(query_weight) *
+              bm25_term_score(static_cast<std::uint16_t>(term_frequency),
+                              document.weighted_length,
+                              average_document_length_,
+                              documents_.size(),
+                              df,
+                              options);
+          accumulated_score.matched_terms += 1;
+        }
         it.next();
       }
     }

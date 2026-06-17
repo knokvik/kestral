@@ -2,6 +2,7 @@
 
 #include "kestral/core/document.hpp"
 #include "kestral/core/document_batch_consumer.hpp"
+#include "kestral/search/deleted_docs.hpp"
 #include "kestral/search/tokenizer.hpp"
 
 #include <cstddef>
@@ -45,11 +46,14 @@ using TransparentStringMap =
 // ---------------------------------------------------------------------------
 // Search types
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+
 struct SearchOptions {
   std::size_t top_k = 10;
   double k1 = 1.2;
   double b = 0.75;
   bool require_all_terms = false;
+  std::shared_ptr<const DeletedDocs> deleted_docs = nullptr;
 };
 
 struct SearchResult {
