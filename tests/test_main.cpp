@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include "kestral/core/concurrent_queue.hpp"
 #include "kestral/ingest/ingestion_pipeline.hpp"
 #include "kestral/ingest/synthetic_corpus.hpp"
+#include "kestral/search/hybrid_search.hpp"
 #include "kestral/search/lexical_index.hpp"
 #include "kestral/search/tokenizer.hpp"
 #include "kestral/search/vbyte.hpp"
@@ -297,9 +299,47 @@ TEST_CASE("VectorIndex integrates with USearch correctly", "[search]") {
   index.consume(batch.documents());
   REQUIRE(index.size() == 3);
 
-  std::vector<float> query(128, 0.1f);
-  auto results = index.search(query, 2);
+  std::vector<float> query_v(128, 0.0f); query_v[0] = 1.0f;
+  auto results = index.search(query_v, 10);
+  REQUIRE( results.size() == 3 );
+  // v2 matches best (cosine distance to itself is 0, others are >0)
+  REQUIRE( results[0].document_id == 2 );
+  REQUIRE( results[0].distance == Catch::Approx(0.0f).margin(1e-5f) );
+}
+
+TEST_CASE("HybridSearchEngine fuses lexical and vector scores correctly", "[hybrid]") {
+  kestral::LexicalSegmentBuilder lexical_builder;
+  kestral::VectorIndex vector_index(128);
+
+  kestral::DocumentBatch batch;
+  std::vector<float> v1(128, 0.1f);
+  std::vector<float> v2(128, 0.0f); v2[0] = 1.0f;
   
-  REQUIRE(results.size() == 2);
-  REQUIRE(results[0].document_id == 1);
+  // Document 1 has a strong lexical match ("hybrid engine") but weak vector
+  batch.add({.id = 1, .title = "Hybrid Engine", .body = "Lexical search is fast", .embedding = v1});
+  
+  // Document 2 has a weak lexical match but strong vector match
+  batch.add({.id = 2, .title = "Another document", .body = "Nothing interesting here", .embedding = v2});
+  
+  // Document 3 has both lexical match and vector match (should win RRF)
+  batch.add({.id = 3, .title = "Hybrid Engine", .body = "Vector search is fast", .embedding = v2});
+
+  lexical_builder.consume(batch.documents());
+  vector_index.consume(batch.documents());
+
+  kestral::PublishedLexicalIndex lexical_index;
+  lexical_index.publish_segment(std::move(lexical_builder).build());
+
+  kestral::HybridSearchEngine hybrid_engine(lexical_index, vector_index);
+
+  auto results = hybrid_engine.search("hybrid engine", v2, 10);
+  REQUIRE(results.size() == 3);
+  
+  // Doc 3 should be rank 1 (strong lexical + strong vector)
+  REQUIRE(results[0].document_id == 3);
+  
+  // Scores should be > 0 and descending
+  REQUIRE(results[0].score > 0.0f);
+  REQUIRE(results[0].score >= results[1].score);
+  REQUIRE(results[1].score >= results[2].score);
 }

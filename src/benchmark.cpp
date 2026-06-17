@@ -3,6 +3,7 @@
 #include "kestral/search/lexical_index.hpp"
 #include "kestral/search/tokenizer.hpp"
 #include "kestral/search/vector_index.hpp"
+#include "kestral/search/hybrid_search.hpp"
 #include "kestral/storage/document_store.hpp"
 
 #include <benchmark/benchmark.h>
@@ -197,6 +198,43 @@ static void BM_VectorIndexSearch(benchmark::State &state) {
   }
 }
 BENCHMARK(BM_VectorIndexSearch)->Arg(10000)->Arg(50000)->Arg(100000)->Iterations(1);
+
+static void BM_HybridSearch(benchmark::State &state) {
+  std::size_t num_docs = state.range(0);
+  kestral::DocumentBatch batch;
+  std::mt19937 gen(42);
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  
+  for (std::size_t i = 0; i < num_docs; ++i) {
+    std::vector<float> vec(128);
+    for (float &v : vec) v = dist(gen);
+    batch.add({.id = static_cast<std::uint64_t>(i),
+               .title = "Hybrid benchmark title",
+               .body = "This is a body full of hybrid content to index lexical keywords",
+               .embedding = vec});
+  }
+
+  kestral::LexicalSegmentBuilder lexical_builder;
+  kestral::VectorIndex vector_index(128);
+  lexical_builder.consume(batch.documents());
+  vector_index.consume(batch.documents());
+
+  kestral::PublishedLexicalIndex lexical_index;
+  lexical_index.publish_segment(std::move(lexical_builder).build());
+
+  kestral::HybridSearchEngine engine(lexical_index, vector_index);
+
+  std::vector<float> query_v(128);
+  for (float &v : query_v) v = dist(gen);
+
+  for (auto _ : state) {
+    for (int i = 0; i < 100; ++i) {
+      auto results = engine.search("hybrid keyword content", query_v, 10);
+      benchmark::DoNotOptimize(results);
+    }
+  }
+}
+BENCHMARK(BM_HybridSearch)->Arg(10000)->Arg(50000)->Arg(100000)->Iterations(1);
 
 // ---------------------------------------------------------------------------
 // Tokenizer micro-benchmark: allocating vs zero-copy

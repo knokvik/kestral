@@ -1,6 +1,7 @@
 set(KESTRAL_LIBRARY_SOURCES
     ingest/ingestion_pipeline.cpp
     ingest/synthetic_corpus.cpp
+    search/hybrid_search.cpp
     search/lexical_index.cpp
     search/tokenizer.cpp
     search/vbyte.cpp
