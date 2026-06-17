@@ -343,3 +343,35 @@ TEST_CASE("HybridSearchEngine fuses lexical and vector scores correctly", "[hybr
   REQUIRE(results[0].score >= results[1].score);
   REQUIRE(results[1].score >= results[2].score);
 }
+
+TEST_CASE("Skip Pointers and DAAT intersection", "[search]") {
+  kestral::LexicalSegmentBuilder builder;
+  kestral::DocumentBatch batch;
+
+  // We want to force a skip block. kSkipInterval is 128.
+  // We'll create 300 documents.
+  // Term "common" is in all documents.
+  // Term "rare" is in doc ID 250 only.
+  
+  for (std::uint32_t i = 1; i <= 300; ++i) {
+    std::string text = "common";
+    if (i == 250) {
+      text += " rare";
+    }
+    batch.add({.id = i, .title = "Test", .body = std::move(text), .embedding = {}});
+  }
+
+  builder.consume(batch.documents());
+  kestral::PublishedLexicalIndex index;
+  index.publish_segment(std::move(builder).build());
+
+  // TAAT OR query
+  auto results_or = index.search("common rare", {.top_k = 10, .require_all_terms = false});
+  REQUIRE(results_or.size() == 10); // Returns top 10 docs that have "common"
+  REQUIRE(results_or[0].document_id == 250); // "rare" gives extra score
+
+  // DAAT AND query
+  auto results_and = index.search("common rare", {.top_k = 10, .require_all_terms = true});
+  REQUIRE(results_and.size() == 1); // Only doc 250 has both
+  REQUIRE(results_and[0].document_id == 250);
+}

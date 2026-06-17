@@ -48,6 +48,7 @@ struct SearchOptions {
   std::size_t top_k = 10;
   double k1 = 1.2;
   double b = 0.75;
+  bool require_all_terms = false;
 };
 
 struct SearchResult {
@@ -103,6 +104,12 @@ private:
   std::unordered_map<std::string_view, std::uint16_t> term_freq_scratch_;
 };
 
+struct TermMetadata {
+  std::size_t postings_offset;
+  std::size_t skips_offset;
+  std::uint32_t document_frequency;
+};
+
 // ---------------------------------------------------------------------------
 // Immutable inverted-index segment (query time)
 // ---------------------------------------------------------------------------
@@ -119,8 +126,9 @@ private:
   InvertedIndexSegment(
       Tokenizer tokenizer,
       std::vector<IndexedLexicalDocument> documents,
-      TransparentStringMap<std::size_t> term_dict,
+      TransparentStringMap<TermMetadata> term_dict,
       std::vector<std::uint8_t> postings_buffer,
+      std::vector<std::uint8_t> skips_buffer,
       double average_document_length);
 
   [[nodiscard]] std::vector<SearchResult>
@@ -129,8 +137,9 @@ private:
 
   Tokenizer tokenizer_;
   std::vector<IndexedLexicalDocument> documents_;
-  TransparentStringMap<std::size_t> term_dict_;
+  TransparentStringMap<TermMetadata> term_dict_;
   std::vector<std::uint8_t> postings_buffer_;
+  std::vector<std::uint8_t> skips_buffer_;
   double average_document_length_ = 0.0;
 };
 
