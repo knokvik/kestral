@@ -5,6 +5,7 @@
 #include "kestral/search/lexical_index.hpp"
 #include "kestral/search/tokenizer.hpp"
 #include "kestral/search/vbyte.hpp"
+#include "kestral/search/vector_index.hpp"
 #include "kestral/storage/document_store.hpp"
 
 #include <chrono>
@@ -277,4 +278,28 @@ TEST_CASE("Parallel ingestion pipeline processes all documents",
   }
 
   std::filesystem::remove_all(db_path);
+}
+
+TEST_CASE("VectorIndex integrates with USearch correctly", "[search]") {
+  kestral::VectorIndex index(128);
+  REQUIRE(index.dimensions() == 128);
+  REQUIRE(index.size() == 0);
+
+  kestral::DocumentBatch batch;
+  std::vector<float> v1(128, 0.1f);
+  std::vector<float> v2(128, 0.0f); v2[0] = 1.0f;
+  std::vector<float> v3(128, -0.1f); v3[0] = 1.0f;
+
+  batch.add({.id = 1, .embedding = v1});
+  batch.add({.id = 2, .embedding = v2});
+  batch.add({.id = 3, .embedding = v3});
+  
+  index.consume(batch.documents());
+  REQUIRE(index.size() == 3);
+
+  std::vector<float> query(128, 0.1f);
+  auto results = index.search(query, 2);
+  
+  REQUIRE(results.size() == 2);
+  REQUIRE(results[0].document_id == 1);
 }

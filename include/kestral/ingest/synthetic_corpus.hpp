@@ -17,6 +17,7 @@ struct SyntheticCorpusConfig {
   std::uint64_t first_timestamp = 1704067200;
   std::uint64_t timestamp_step_seconds = 3;
   std::uint64_t seed = 42;
+  std::size_t embedding_dimension = 128;
   std::vector<std::string> vocabulary = {
       "vector",    "index",     "pipeline", "latency",   "ranking",
       "segment",   "storage",   "recall",   "fusion",    "posting",
@@ -47,6 +48,7 @@ private:
   std::mt19937_64 random_engine_;
   std::uniform_int_distribution<std::size_t> term_picker_;
   std::uniform_int_distribution<std::size_t> category_picker_;
+  std::uniform_real_distribution<float> embedding_value_generator_;
 };
 
 } // namespace kestral

@@ -25,6 +25,7 @@ find_package(Catch2 CONFIG REQUIRED)
 find_package(RocksDB CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(usearch CONFIG REQUIRED)
 
 # 4. Process the src subdirectory (this builds the core library and benchmarks)
 add_subdirectory(src)

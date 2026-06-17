@@ -22,6 +22,7 @@ SyntheticCorpusGenerator::SyntheticCorpusGenerator(SyntheticCorpusConfig config)
       0, config_.vocabulary.size() - 1);
   category_picker_ = std::uniform_int_distribution<std::size_t>(
       0, config_.categories.size() - 1);
+  embedding_value_generator_ = std::uniform_real_distribution<float>(-1.0f, 1.0f);
 }
 
 void SyntheticCorpusGenerator::generate_next_batch(DocumentBatch &batch,
@@ -46,6 +47,11 @@ Document SyntheticCorpusGenerator::make_document() {
   document.timestamp = next_timestamp_;
   document.title = make_title();
   document.body = make_body();
+
+  document.embedding.resize(config_.embedding_dimension);
+  for (auto &val : document.embedding) {
+    val = embedding_value_generator_(random_engine_);
+  }
 
   next_timestamp_ += config_.timestamp_step_seconds;
   return document;

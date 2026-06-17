@@ -5,6 +5,7 @@
     "catch2" ,
     "rocksdb",
     "spdlog",
-    "benchmark"
+    "benchmark",
+    "usearch"
   ]
 }

@@ -13,6 +13,7 @@ struct Document {
   std::uint64_t timestamp = 0;
   std::string title;
   std::string body;
+  std::vector<float> embedding;
 };
 
 class DocumentBatch {

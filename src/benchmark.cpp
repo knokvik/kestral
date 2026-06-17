@@ -2,6 +2,7 @@
 #include "kestral/ingest/synthetic_corpus.hpp"
 #include "kestral/search/lexical_index.hpp"
 #include "kestral/search/tokenizer.hpp"
+#include "kestral/search/vector_index.hpp"
 #include "kestral/storage/document_store.hpp"
 
 #include <benchmark/benchmark.h>
@@ -149,6 +150,53 @@ void BM_ParallelIngestion(benchmark::State &state) {
 }
 
 BENCHMARK(BM_ParallelIngestion)->Arg(2)->Arg(4)->Arg(8);
+
+static void BM_VectorIndexIngestion(benchmark::State &state) {
+  std::size_t num_docs = state.range(0);
+  kestral::DocumentBatch batch;
+  std::mt19937 gen(42);
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  
+  for (std::size_t i = 0; i < num_docs; ++i) {
+    std::vector<float> vec(128);
+    for (float &v : vec) v = dist(gen);
+    batch.add({.id = static_cast<std::uint64_t>(i), .embedding = vec});
+  }
+
+  for (auto _ : state) {
+    kestral::VectorIndex index(128);
+    index.consume(batch.documents());
+    benchmark::DoNotOptimize(index);
+  }
+}
+BENCHMARK(BM_VectorIndexIngestion)->Arg(10000)->Arg(50000)->Arg(100000);
+
+static void BM_VectorIndexSearch(benchmark::State &state) {
+  std::size_t num_docs = state.range(0);
+  kestral::DocumentBatch batch;
+  std::mt19937 gen(42);
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  
+  for (std::size_t i = 0; i < num_docs; ++i) {
+    std::vector<float> vec(128);
+    for (float &v : vec) v = dist(gen);
+    batch.add({.id = static_cast<std::uint64_t>(i), .embedding = vec});
+  }
+
+  kestral::VectorIndex index(128);
+  index.consume(batch.documents());
+
+  std::vector<float> query(128);
+  for (float &v : query) v = dist(gen);
+
+  for (auto _ : state) {
+    for (int i = 0; i < 100; ++i) {
+      auto results = index.search(query, 10);
+      benchmark::DoNotOptimize(results);
+    }
+  }
+}
+BENCHMARK(BM_VectorIndexSearch)->Arg(10000)->Arg(50000)->Arg(100000)->Iterations(1);
 
 // ---------------------------------------------------------------------------
 // Tokenizer micro-benchmark: allocating vs zero-copy
