@@ -17,6 +17,7 @@ struct CommandLineOptions {
   std::size_t batch_size = 4096;
   std::size_t write_buffer_size_mb = 128;
   std::size_t top_k = 5;
+  std::size_t num_threads = 0;
   std::string query;
 };
 
@@ -68,6 +69,11 @@ CommandLineOptions parse_command_line(int argc, char **argv) {
       continue;
     }
 
+    if (argument == "--threads" && index + 1 < argc) {
+      options.num_threads = parse_unsigned(argv[++index], "--threads");
+      continue;
+    }
+
     throw std::invalid_argument("Unknown or incomplete argument: " +
                                 std::string(argument));
   }
@@ -97,6 +103,7 @@ int main(int argc, char **argv) {
         {
             .total_documents = options.document_count,
             .batch_size = options.batch_size,
+            .num_threads = options.num_threads,
             .consumers = {&lexical_segment_builder},
         });
 

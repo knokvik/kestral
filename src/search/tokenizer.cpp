@@ -11,7 +11,7 @@ std::vector<std::string> Tokenizer::tokenize(std::string_view text) const {
 }
 
 void Tokenizer::tokenize_into(std::string_view text,
-                              std::vector<std::string> &tokens) const {
+                               std::vector<std::string> &tokens) const {
   tokens.clear();
 
   std::string current_token;
@@ -32,6 +32,38 @@ void Tokenizer::tokenize_into(std::string_view text,
 
   if (!current_token.empty()) {
     tokens.push_back(current_token);
+  }
+}
+
+void Tokenizer::tokenize_views(std::string_view text, std::string &scratch,
+                                std::vector<std::string_view> &tokens) const {
+  tokens.clear();
+  scratch.clear();
+  // Reserve worst-case (every char is a term char). This guarantees no
+  // reallocation, keeping all returned string_views valid.
+  scratch.reserve(text.size());
+
+  std::size_t token_start = 0;
+  bool in_token = false;
+
+  for (const unsigned char ch : text) {
+    if (is_term_character(ch)) {
+      if (!in_token) {
+        token_start = scratch.size();
+        in_token = true;
+      }
+      scratch.push_back(
+          static_cast<char>(std::tolower(static_cast<int>(ch))));
+    } else if (in_token) {
+      tokens.emplace_back(scratch.data() + token_start,
+                          scratch.size() - token_start);
+      in_token = false;
+    }
+  }
+
+  if (in_token) {
+    tokens.emplace_back(scratch.data() + token_start,
+                        scratch.size() - token_start);
   }
 }
 

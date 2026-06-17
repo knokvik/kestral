@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -15,6 +16,34 @@
 
 namespace kestral {
 
+// ---------------------------------------------------------------------------
+// Transparent hash & equality — enables heterogeneous lookup on
+// unordered_map<string, V> with string_view keys, avoiding temporary
+// string construction on every map lookup.
+// ---------------------------------------------------------------------------
+struct TransparentStringHash {
+  using is_transparent = void;
+  std::size_t operator()(std::string_view sv) const noexcept {
+    return std::hash<std::string_view>{}(sv);
+  }
+};
+
+struct TransparentStringEqual {
+  using is_transparent = void;
+  bool operator()(std::string_view a, std::string_view b) const noexcept {
+    return a == b;
+  }
+};
+
+// Convenience alias for maps that accept heterogeneous (string_view) lookups.
+template <typename V>
+using TransparentStringMap =
+    std::unordered_map<std::string, V, TransparentStringHash,
+                       TransparentStringEqual>;
+
+// ---------------------------------------------------------------------------
+// Search types
+// ---------------------------------------------------------------------------
 struct SearchOptions {
   std::size_t top_k = 10;
   double k1 = 1.2;
@@ -32,11 +61,14 @@ struct IndexedLexicalDocument {
   std::uint32_t weighted_length = 0;
 };
 
-struct PostingList {
+struct BuilderPostingList {
   std::vector<std::uint32_t> doc_indexes;
   std::vector<std::uint16_t> term_frequencies;
 };
 
+// ---------------------------------------------------------------------------
+// Lexical segment builder (ingestion time)
+// ---------------------------------------------------------------------------
 class InvertedIndexSegment;
 
 class LexicalSegmentBuilder final : public DocumentBatchConsumer {
@@ -49,9 +81,10 @@ public:
 
 private:
   void index_document(const Document &document);
-  void add_tokens(const std::vector<std::string> &tokens,
+  void add_tokens(std::span<const std::string_view> tokens,
                   std::uint16_t weight,
-                  std::unordered_map<std::string, std::uint16_t> &term_frequencies,
+                  std::unordered_map<std::string_view, std::uint16_t>
+                      &term_frequencies,
                   std::uint32_t &weighted_length) const;
 
   static constexpr std::uint16_t kTitleWeight = 2;
@@ -59,10 +92,20 @@ private:
 
   Tokenizer tokenizer_;
   std::vector<IndexedLexicalDocument> documents_;
-  std::unordered_map<std::string, PostingList> postings_;
+  TransparentStringMap<BuilderPostingList> postings_;
   std::uint64_t total_document_length_ = 0;
+
+  // Reusable scratch buffers — cleared per document, never deallocated.
+  std::string scratch_title_;
+  std::string scratch_body_;
+  std::vector<std::string_view> title_views_;
+  std::vector<std::string_view> body_views_;
+  std::unordered_map<std::string_view, std::uint16_t> term_freq_scratch_;
 };
 
+// ---------------------------------------------------------------------------
+// Immutable inverted-index segment (query time)
+// ---------------------------------------------------------------------------
 class InvertedIndexSegment {
 public:
   [[nodiscard]] std::size_t document_count() const;
@@ -76,18 +119,24 @@ private:
   InvertedIndexSegment(
       Tokenizer tokenizer,
       std::vector<IndexedLexicalDocument> documents,
-      std::unordered_map<std::string, PostingList> postings,
+      TransparentStringMap<std::size_t> term_dict,
+      std::vector<std::uint8_t> postings_buffer,
       double average_document_length);
 
   [[nodiscard]] std::vector<SearchResult>
-  search(std::span<const std::string> query_terms, SearchOptions options) const;
+  search(std::span<const std::string_view> query_terms,
+         SearchOptions options) const;
 
   Tokenizer tokenizer_;
   std::vector<IndexedLexicalDocument> documents_;
-  std::unordered_map<std::string, PostingList> postings_;
+  TransparentStringMap<std::size_t> term_dict_;
+  std::vector<std::uint8_t> postings_buffer_;
   double average_document_length_ = 0.0;
 };
 
+// ---------------------------------------------------------------------------
+// Published multi-segment index (read-only, thread-safe via shared_ptr)
+// ---------------------------------------------------------------------------
 class PublishedLexicalIndex {
 public:
   void publish_segment(InvertedIndexSegment segment);

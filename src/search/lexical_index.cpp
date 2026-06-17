@@ -1,4 +1,5 @@
 #include "kestral/search/lexical_index.hpp"
+#include "kestral/search/vbyte.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -61,24 +62,44 @@ InvertedIndexSegment LexicalSegmentBuilder::build() && {
           : static_cast<double>(total_document_length_) /
                 static_cast<double>(documents_.size());
 
+  std::vector<std::uint8_t> postings_buffer;
+  TransparentStringMap<std::size_t> term_dict;
+
+  for (const auto &[term, posting_list] : postings_) {
+    term_dict[term] = postings_buffer.size();
+
+    encode_vbyte(static_cast<std::uint32_t>(posting_list.doc_indexes.size()),
+                 postings_buffer);
+
+    std::uint32_t prev_doc_index = 0;
+    for (std::size_t i = 0; i < posting_list.doc_indexes.size(); ++i) {
+      const std::uint32_t doc_index = posting_list.doc_indexes[i];
+      const std::uint32_t delta = doc_index - prev_doc_index;
+      encode_vbyte(delta, postings_buffer);
+      encode_vbyte(posting_list.term_frequencies[i], postings_buffer);
+      prev_doc_index = doc_index;
+    }
+  }
+
   return InvertedIndexSegment(std::move(tokenizer_),
                               std::move(documents_),
-                              std::move(postings_),
+                              std::move(term_dict),
+                              std::move(postings_buffer),
                               average_document_length);
 }
 
 void LexicalSegmentBuilder::index_document(const Document &document) {
-  std::vector<std::string> title_tokens;
-  std::vector<std::string> body_tokens;
-  tokenizer_.tokenize_into(document.title, title_tokens);
-  tokenizer_.tokenize_into(document.body, body_tokens);
+  // Zero-copy tokenization: tokens are string_views into scratch buffers.
+  tokenizer_.tokenize_views(document.title, scratch_title_, title_views_);
+  tokenizer_.tokenize_views(document.body, scratch_body_, body_views_);
 
-  std::unordered_map<std::string, std::uint16_t> term_frequencies;
-  term_frequencies.reserve(title_tokens.size() + body_tokens.size());
+  // Reuse the per-document term frequency map (clear, don't deallocate).
+  term_freq_scratch_.clear();
+  term_freq_scratch_.reserve(title_views_.size() + body_views_.size());
 
   std::uint32_t weighted_length = 0;
-  add_tokens(title_tokens, kTitleWeight, term_frequencies, weighted_length);
-  add_tokens(body_tokens, kBodyWeight, term_frequencies, weighted_length);
+  add_tokens(title_views_, kTitleWeight, term_freq_scratch_, weighted_length);
+  add_tokens(body_views_, kBodyWeight, term_freq_scratch_, weighted_length);
 
   const auto document_index = static_cast<std::uint32_t>(documents_.size());
   documents_.push_back({
@@ -87,17 +108,23 @@ void LexicalSegmentBuilder::index_document(const Document &document) {
   });
   total_document_length_ += weighted_length;
 
-  for (auto &[term, frequency] : term_frequencies) {
-    auto &posting_list = postings_[term];
-    posting_list.doc_indexes.push_back(document_index);
-    posting_list.term_frequencies.push_back(frequency);
+  // Insert into the postings map. Transparent hash lets us look up with
+  // string_view without constructing a temporary std::string.
+  for (const auto &[term_view, frequency] : term_freq_scratch_) {
+    auto it = postings_.find(term_view);
+    if (it == postings_.end()) {
+      // Only allocate a std::string for genuinely new terms.
+      it = postings_.emplace(std::string(term_view), BuilderPostingList{})
+               .first;
+    }
+    it->second.doc_indexes.push_back(document_index);
+    it->second.term_frequencies.push_back(frequency);
   }
 }
 
 void LexicalSegmentBuilder::add_tokens(
-    const std::vector<std::string> &tokens,
-    std::uint16_t weight,
-    std::unordered_map<std::string, std::uint16_t> &term_frequencies,
+    std::span<const std::string_view> tokens, std::uint16_t weight,
+    std::unordered_map<std::string_view, std::uint16_t> &term_frequencies,
     std::uint32_t &weighted_length) const {
   weighted_length += static_cast<std::uint32_t>(tokens.size()) * weight;
 
@@ -106,14 +133,20 @@ void LexicalSegmentBuilder::add_tokens(
   }
 }
 
+// ---------------------------------------------------------------------------
+// InvertedIndexSegment
+// ---------------------------------------------------------------------------
+
 InvertedIndexSegment::InvertedIndexSegment(
     Tokenizer tokenizer,
     std::vector<IndexedLexicalDocument> documents,
-    std::unordered_map<std::string, PostingList> postings,
+    TransparentStringMap<std::size_t> term_dict,
+    std::vector<std::uint8_t> postings_buffer,
     double average_document_length)
     : tokenizer_(std::move(tokenizer)),
       documents_(std::move(documents)),
-      postings_(std::move(postings)),
+      term_dict_(std::move(term_dict)),
+      postings_buffer_(std::move(postings_buffer)),
       average_document_length_(average_document_length) {}
 
 std::size_t InvertedIndexSegment::document_count() const {
@@ -121,7 +154,7 @@ std::size_t InvertedIndexSegment::document_count() const {
 }
 
 std::size_t InvertedIndexSegment::unique_term_count() const {
-  return postings_.size();
+  return term_dict_.size();
 }
 
 double InvertedIndexSegment::average_document_length() const {
@@ -129,13 +162,14 @@ double InvertedIndexSegment::average_document_length() const {
 }
 
 std::vector<SearchResult> InvertedIndexSegment::search(
-    std::span<const std::string> query_terms,
+    std::span<const std::string_view> query_terms,
     SearchOptions options) const {
   if (query_terms.empty() || documents_.empty()) {
     return {};
   }
 
-  std::unordered_map<std::string, std::uint32_t> query_term_weights;
+  // Deduplicate and weight query terms.
+  std::unordered_map<std::string_view, std::uint32_t> query_term_weights;
   query_term_weights.reserve(query_terms.size());
   for (const auto &term : query_terms) {
     query_term_weights[term] += 1;
@@ -144,23 +178,33 @@ std::vector<SearchResult> InvertedIndexSegment::search(
   std::unordered_map<std::uint32_t, AccumulatedScore> accumulators;
 
   for (const auto &[term, query_weight] : query_term_weights) {
-    const auto posting_list_iterator = postings_.find(term);
-    if (posting_list_iterator == postings_.end()) {
+    // Transparent hash lookup: string_view key against string-keyed map.
+    const auto term_dict_iterator = term_dict_.find(term);
+    if (term_dict_iterator == term_dict_.end()) {
       continue;
     }
 
-    const auto &posting_list = posting_list_iterator->second;
-    const auto document_frequency = posting_list.doc_indexes.size();
+    const auto offset = term_dict_iterator->second;
+    const std::uint8_t *ptr = postings_buffer_.data() + offset;
 
+    std::uint32_t document_frequency = 0;
+    ptr = decode_vbyte(ptr, document_frequency);
+
+    std::uint32_t current_doc_index = 0;
     for (std::size_t index = 0; index < document_frequency; ++index) {
-      const auto document_index = posting_list.doc_indexes[index];
-      const auto term_frequency = posting_list.term_frequencies[index];
-      const auto &document = documents_[document_index];
+      std::uint32_t delta = 0;
+      ptr = decode_vbyte(ptr, delta);
+      current_doc_index += delta;
 
-      auto &accumulated_score = accumulators[document_index];
+      std::uint32_t term_frequency = 0;
+      ptr = decode_vbyte(ptr, term_frequency);
+
+      const auto &document = documents_[current_doc_index];
+
+      auto &accumulated_score = accumulators[current_doc_index];
       accumulated_score.score +=
           static_cast<double>(query_weight) *
-          bm25_term_score(term_frequency,
+          bm25_term_score(static_cast<std::uint16_t>(term_frequency),
                           document.weighted_length,
                           average_document_length_,
                           documents_.size(),
@@ -186,7 +230,8 @@ std::vector<SearchResult> InvertedIndexSegment::search(
     return {};
   }
 
-  const auto ranking = [](const SearchResult &left, const SearchResult &right) {
+  const auto ranking = [](const SearchResult &left,
+                          const SearchResult &right) {
     if (left.score == right.score) {
       if (left.matched_terms == right.matched_terms) {
         return left.document_id < right.document_id;
@@ -206,18 +251,25 @@ std::vector<SearchResult> InvertedIndexSegment::search(
   return results;
 }
 
+// ---------------------------------------------------------------------------
+// PublishedLexicalIndex
+// ---------------------------------------------------------------------------
+
 void PublishedLexicalIndex::publish_segment(InvertedIndexSegment segment) {
   segments_.push_back(
       std::make_shared<const InvertedIndexSegment>(std::move(segment)));
 }
 
-std::vector<SearchResult> PublishedLexicalIndex::search(std::string_view query,
-                                                        SearchOptions options) const {
+std::vector<SearchResult> PublishedLexicalIndex::search(
+    std::string_view query, SearchOptions options) const {
   if (options.top_k == 0) {
     return {};
   }
 
-  const auto query_terms = tokenizer_.tokenize(query);
+  // Zero-copy tokenization for the query path too.
+  std::string scratch;
+  std::vector<std::string_view> query_terms;
+  tokenizer_.tokenize_views(query, scratch, query_terms);
   if (query_terms.empty()) {
     return {};
   }
@@ -234,7 +286,8 @@ std::vector<SearchResult> PublishedLexicalIndex::search(std::string_view query,
     return {};
   }
 
-  const auto ranking = [](const SearchResult &left, const SearchResult &right) {
+  const auto ranking = [](const SearchResult &left,
+                          const SearchResult &right) {
     if (left.score == right.score) {
       if (left.matched_terms == right.matched_terms) {
         return left.document_id < right.document_id;

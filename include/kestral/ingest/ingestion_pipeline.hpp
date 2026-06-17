@@ -12,6 +12,7 @@ namespace kestral {
 struct IngestionPipelineConfig {
   std::size_t total_documents = 100000;
   std::size_t batch_size = 4096;
+  std::size_t num_threads = 0; // 0 = sequential (original path)
   std::vector<DocumentBatchConsumer *> consumers;
 };
 
@@ -34,6 +35,9 @@ public:
   [[nodiscard]] IngestionMetrics run();
 
 private:
+  [[nodiscard]] IngestionMetrics run_sequential();
+  [[nodiscard]] IngestionMetrics run_parallel();
+
   SyntheticCorpusGenerator &generator_;
   DocumentStore &store_;
   IngestionPipelineConfig config_;

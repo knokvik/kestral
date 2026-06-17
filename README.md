@@ -9,11 +9,13 @@ The end state is a high-throughput hybrid search engine with:
 - hybrid retrieval with Reciprocal Rank Fusion (RRF)
 - near-real-time segment publication for fresh documents
 
-The current codebase now covers the first two slices of that plan:
+The current codebase now covers the first three slices of that plan:
 
 - a measured ingestion foundation
 - a searchable lexical segment built with BM25 retrieval
-## Current Milestone: Ingestion + Lexical Retrieval
+- compressed inverted index with VByte encoding
+- parallel ingestion pipeline with thread pool
+## Current Milestone: Ingestion + Lexical Retrieval + Parallel Pipeline
 
 What is implemented today:
 
@@ -21,8 +23,9 @@ What is implemented today:
 - a synthetic corpus generator that emits realistic search-oriented documents
 - a batched ingestion pipeline that measures throughput and batch latency
 - a RocksDB-backed storage layer using bulk writes
-- a segment builder that turns batches into an immutable inverted index
+- a segment builder that turns batches into an immutable inverted index (with Delta/VByte-compressed postings)
 - a BM25 lexical retriever with simple ranked top-k search
+- a thread pool and bounded concurrent queue for parallel batch processing
 - unit tests plus a benchmark harness for repeatable measurement
 
 Why this slice matters:
@@ -35,6 +38,8 @@ Why this slice matters:
   - pre-sized document batches and string buffers to reduce allocation churn
   - query-time postings stored in structure-of-arrays form for tighter scans
   - title terms are weighted during indexing so scoring stays simple at query time
+  - Delta/VByte-compressed postings for reduced memory footprint and better cache locality
+  - parallel producer/consumer pipeline with bounded backpressure queue
 
 ## Architecture
 
@@ -42,27 +47,29 @@ Why this slice matters:
 flowchart LR
     A["Synthetic Corpus Generator"] --> B["DocumentBatch"]
     B --> C["Ingestion Pipeline"]
-    C --> D["RocksDB WriteBatch"]
-    C --> E["Lexical Segment Builder"]
-    D --> F["Document Store"]
-    E --> G["Published Inverted Segment"]
-    G --> H["BM25 Search"]
-    C --> I["Metrics: docs/sec, avg batch ms, p95 batch ms"]
+    C -->|sequential or parallel| D["ConcurrentQueue"]
+    D --> E["Worker Threads"]
+    E --> F["RocksDB WriteBatch"]
+    E --> G["Lexical Segment Builder"]
+    F --> H["Document Store"]
+    G --> I["VByte Compressed Segment"]
+    I --> J["BM25 Search"]
+    C --> K["Metrics: docs/sec, avg batch ms, p95 batch ms"]
 ```
 
 ## Project Layout
 
 ```text
-include/kestral/core      Core document types
+include/kestral/core      Core document types, thread pool, concurrent queue
 include/kestral/ingest    Corpus generation and ingestion pipeline
-include/kestral/search    Tokenization and lexical retrieval
+include/kestral/search    Tokenization, VByte encoding, and lexical retrieval
 include/kestral/storage   RocksDB-backed document storage
-src/ingest                Ingestion implementations
-src/search                Tokenization and lexical index implementation
+src/ingest                Ingestion implementations (sequential + parallel)
+src/search                Tokenization, VByte, and lexical index implementation
 src/storage               Storage implementation
 src/main.cpp              CLI demo entry point
-src/benchmark.cpp         Google Benchmark harness
-tests/test_main.cpp       Catch2 coverage for ingest + storage + search
+src/benchmark.cpp         Google Benchmark harness (sequential + parallel)
+tests/test_main.cpp       Catch2 coverage for ingest + storage + search + concurrency
 ```
 
 ## Build
@@ -87,6 +94,12 @@ Ingest and immediately run a lexical search:
 ./build/kestral_run --docs 5000 --batch-size 512 --db-path /tmp/kestral-demo-db --query "vector search latency" --top-k 5
 ```
 
+Run with parallel ingestion (4 worker threads):
+
+```bash
+./build/kestral_run --docs 50000 --batch-size 2048 --threads 4 --db-path /tmp/kestral-demo-db
+```
+
 Run the ingestion benchmark:
 
 ```bash
@@ -103,24 +116,22 @@ Commands run in this workspace for this milestone:
 
 Sample output from the current machine:
 
-- demo ingest + lexical search:
-  - `2000 docs in 0.052s` (`38.5k docs/sec`)
-  - `1 lexical segment`, `24 unique terms`
-  - query `"vector search latency"` returned ranked results immediately after ingest
-- benchmark ingest:
-  - batch `512`: `154.0k docs/sec`
-  - batch `2048`: `154.6k docs/sec`
-  - batch `8192`: `147.9k docs/sec`
-- benchmark lexical search:
+- benchmark sequential ingest:
+  - batch `2048`: `151.5k docs/sec`
+- benchmark parallel ingest:
+  - `2 threads`: `162.5k docs/sec`
+  - `4 threads`: `172.2k docs/sec`
+  - `8 threads`: `173.6k docs/sec`
+- benchmark lexical search (VByte compressed):
   - `10k docs`: `0.92 ms`
-  - `50k docs`: `5.69 ms`
-  - `100k docs`: `8.91 ms`
+  - `50k docs`: `4.88 ms`
+  - `100k docs`: `9.86 ms`
 
 These numbers are still an early snapshot, but they already show the shape we want: one pass through ingestion can both persist the document payload and publish a searchable lexical segment without rereading the corpus.
 
 ## Next Milestones
 
-1. Replace the current in-memory postings with compressed segment storage and faster query-time intersections.
+1. [x] Replace the current in-memory postings with compressed segment storage and faster query-time intersections.
 2. Add a quantized vector index and hybrid retrieval with RRF.
 3. Add near-real-time multi-segment publication, soft deletes, and background merge/compaction.
 4. Add controlled benchmark tables, flame graphs, and a deeper performance write-up.

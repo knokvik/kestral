@@ -1,12 +1,14 @@
 #include "kestral/ingest/ingestion_pipeline.hpp"
 #include "kestral/ingest/synthetic_corpus.hpp"
 #include "kestral/search/lexical_index.hpp"
+#include "kestral/search/tokenizer.hpp"
 #include "kestral/storage/document_store.hpp"
 
 #include <benchmark/benchmark.h>
 
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -104,4 +106,120 @@ void BM_LexicalSearch(benchmark::State &state) {
 BENCHMARK(BM_BatchedIngestion)->Arg(512)->Arg(2048)->Arg(8192);
 BENCHMARK(BM_LexicalSearch)->Arg(10000)->Arg(50000)->Arg(100000);
 
+void BM_ParallelIngestion(benchmark::State &state) {
+  const std::size_t num_threads = static_cast<std::size_t>(state.range(0));
+  constexpr std::size_t kDocumentCount = 100000;
+  constexpr std::size_t kBatchSize = 4096;
+  const auto db_path = make_benchmark_path(static_cast<int>(num_threads) + 100);
+
+  for (auto _ : state) {
+    state.PauseTiming();
+    std::filesystem::remove_all(db_path);
+    state.ResumeTiming();
+
+    kestral::IngestionMetrics metrics;
+    {
+      kestral::SyntheticCorpusGenerator generator;
+      kestral::DocumentStore store({
+          .db_path = db_path.string(),
+          .write_buffer_size_mb = 128,
+      });
+      kestral::IngestionPipeline pipeline(
+          generator,
+          store,
+          {
+              .total_documents = kDocumentCount,
+              .batch_size = kBatchSize,
+              .num_threads = num_threads,
+          });
+
+      metrics = pipeline.run();
+    }
+
+    auto docs_per_second = metrics.documents_per_second;
+    benchmark::DoNotOptimize(docs_per_second);
+    state.counters["docs_per_sec"] = metrics.documents_per_second;
+    state.counters["avg_batch_ms"] = metrics.average_batch_latency_ms;
+    state.counters["p95_batch_ms"] = metrics.p95_batch_latency_ms;
+
+    state.PauseTiming();
+    std::filesystem::remove_all(db_path);
+    state.ResumeTiming();
+  }
+}
+
+BENCHMARK(BM_ParallelIngestion)->Arg(2)->Arg(4)->Arg(8);
+
+// ---------------------------------------------------------------------------
+// Tokenizer micro-benchmark: allocating vs zero-copy
+// ---------------------------------------------------------------------------
+namespace {
+
+void BM_TokenizerAllocating(benchmark::State &state) {
+  // Build a realistic-length text string from synthetic corpus words.
+  const std::string text =
+      "The vector search engine processes documents with high throughput and "
+      "low latency while maintaining freshness guarantees for segment merging "
+      "and compaction across multiple storage tiers in the indexing pipeline. "
+      "Allocator throughput ranking storage query vector segment latency.";
+
+  kestral::Tokenizer tokenizer;
+  for (auto _ : state) {
+    auto tokens = tokenizer.tokenize(text);
+    benchmark::DoNotOptimize(tokens.data());
+    benchmark::ClobberMemory();
+  }
+}
+
+void BM_TokenizerZeroCopy(benchmark::State &state) {
+  const std::string text =
+      "The vector search engine processes documents with high throughput and "
+      "low latency while maintaining freshness guarantees for segment merging "
+      "and compaction across multiple storage tiers in the indexing pipeline. "
+      "Allocator throughput ranking storage query vector segment latency.";
+
+  kestral::Tokenizer tokenizer;
+  std::string scratch;
+  std::vector<std::string_view> tokens;
+  for (auto _ : state) {
+    tokenizer.tokenize_views(text, scratch, tokens);
+    benchmark::DoNotOptimize(tokens.data());
+    benchmark::ClobberMemory();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Segment-builder-only ingestion (no RocksDB, isolates indexing performance)
+// ---------------------------------------------------------------------------
+void BM_SegmentBuilderIngestion(benchmark::State &state) {
+  const std::size_t document_count = static_cast<std::size_t>(state.range(0));
+  constexpr std::size_t kBatchSize = 4096;
+
+  for (auto _ : state) {
+    kestral::SyntheticCorpusGenerator generator;
+    kestral::DocumentBatch batch(kBatchSize);
+    kestral::LexicalSegmentBuilder builder;
+
+    std::size_t remaining = document_count;
+    while (remaining > 0) {
+      const auto count = std::min(kBatchSize, remaining);
+      generator.generate_next_batch(batch, count);
+      builder.consume(batch.documents());
+      remaining -= count;
+    }
+
+    auto segment = std::move(builder).build();
+    benchmark::DoNotOptimize(segment.document_count());
+  }
+
+  state.counters["docs"] = static_cast<double>(document_count);
+}
+
+} // namespace
+
+BENCHMARK(BM_TokenizerAllocating);
+BENCHMARK(BM_TokenizerZeroCopy);
+BENCHMARK(BM_SegmentBuilderIngestion)->Arg(10000)->Arg(50000)->Arg(100000);
+
 BENCHMARK_MAIN();
+
