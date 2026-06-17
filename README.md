@@ -2,11 +2,6 @@
 
 Kestral Engine is a state-of-the-art, high-throughput C++ document processing engine engineered for microsecond latencies and massive scalability. It leverages bare-metal hardware acceleration to parse, tokenize, and ingest multi-gigabyte corpora directly into queryable in-memory structures. By completely avoiding dynamic memory allocations in the hot path, Kestral routinely saturates modern NVMe storage and multi-core architectures to achieve over 150,000 documents per second per node.
 
-### Core Features
-- **SIMD-Accelerated Parsing**: Utilizes AVX2/AVX-512 intrinsic operations for vector-parallel string scanning and tokenization.
-- **Zero-Copy Architecture**: End-to-end `std::string_view` utilization ensures document data is never duplicated in memory.
-- **Lock-Free Concurrency**: Implements a producer-consumer work-stealing queue to eliminate thread contention and synchronization overhead.
-- **Slab Memory Pooling**: Pre-allocates deterministic memory arenas to guarantee $O(1)$ allocation bounds and eradicate heap fragmentation.
 
 ### Architecture Pipeline
 
