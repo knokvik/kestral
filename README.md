@@ -58,7 +58,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DCXX_FLAGS="-O3 -march=native -flto"
 cmake --build build --target benchmark_exe -j$(nproc)
 
 # 2. Execute and output to JSON
-./build/src/benchmark_exe --benchmark_format=json > benchmark_assets/results.json
+./build/src/benchmark_exe --benchmark_out=benchmark_assets/results.json --benchmark_out_format=json
 
 # 3. Render the performance graphs
 python3 benchmark_assets/plot_benchmarks.py benchmark_assets/results.json
